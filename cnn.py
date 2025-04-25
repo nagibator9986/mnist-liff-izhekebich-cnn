@@ -9,14 +9,14 @@ import logging
 import csv
 
 # Настройка логирования
-logging.basicConfig(filename='honest_cnn_log.log', level=logging.INFO, 
+logging.basicConfig(filename='cnn_log_fixed.log', level=logging.INFO, 
                     format='%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # Параметры
 EPOCHS = 30
 BATCH_SIZE = 128
 INPUT_SHAPE = (28, 28, 1)
-INIT_LR = 0.02  # Как у Ижикевича
+INIT_LR = 0.001  # Уменьшено для стабильности
 TDP = 160  # Вт, TDP RTX 4060 Ti
 
 # Загрузка данных
@@ -29,41 +29,60 @@ X = X.values.reshape(-1, 28, 28, 1)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
 
-# Модель CNN
+
+print("Train class distribution:", np.bincount(y_train))
+print("Val class distribution:", np.bincount(y_val))
+print("Test class distribution:", np.bincount(y_test))
+
 model = models.Sequential([
-    layers.Flatten(input_shape=INPUT_SHAPE),
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=INPUT_SHAPE, padding='same'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D((2, 2)),
+    layers.Flatten(),
     layers.Dense(512, activation='relu'),
     layers.Dropout(0.3),
     layers.Dense(10, activation='softmax')
 ])
 
-# Компиляция
 optimizer = tf.keras.optimizers.Adam(learning_rate=INIT_LR, beta_1=0.9, beta_2=0.999)
 model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 model.summary()
 
-# Подсчет FLOPs (приблизительно)
 def get_flops(model):
     flops = 0
     for layer in model.layers:
-        if isinstance(layer, tf.keras.layers.Dense):
-            flops += layer.input_shape[-1] * layer.output_shape[-1] * 2  # Умножение + сложение
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            output_shape = layer.output_shape[1:3]
+            kernel_size = layer.kernel_size[0] * layer.kernel_size[1]
+            flops += (kernel_size * layer.input_shape[-1] * layer.filters * output_shape[0] * output_shape[1] * 2)
+        elif isinstance(layer, tf.keras.layers.Dense):
+            flops += layer.input_shape[-1] * layer.output_shape[-1] * 2
+        elif isinstance(layer, tf.keras.layers.MaxPooling2D):
+            output_shape = layer.output_shape[1:3]
+            pool_size = layer.pool_size[0] * layer.pool_size[1]
+            flops += output_shape[0] * output_shape[1] * layer.input_shape[-1] * pool_size
     return flops
 
 flops_per_sample = get_flops(model)
 total_flops = flops_per_sample * (len(X_train) // BATCH_SIZE) * EPOCHS
 
-# Обучение с аналитикой
 logging.info("Training CNN...")
 print("\nTraining CNN...")
 history = {'accuracy': [], 'val_accuracy': [], 'loss': [], 'val_loss': [], 'time_per_epoch': [], 'energy_per_epoch': []}
 
+callbacks = [
+    tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
+]
+
 for epoch in range(EPOCHS):
     start_time = time.time()
     hist = model.fit(X_train, y_train, epochs=1, batch_size=BATCH_SIZE, 
-                     validation_data=(X_val, y_val), verbose=1)
+                     validation_data=(X_val, y_val), verbose=1, callbacks=callbacks)
     epoch_time = time.time() - start_time
-    energy_epoch = TDP * (epoch_time / 3600)  # Вт·ч
+    energy_epoch = TDP * (epoch_time / 3600)
     
     history['accuracy'].append(hist.history['accuracy'][0])
     history['val_accuracy'].append(hist.history['val_accuracy'][0])
@@ -78,42 +97,51 @@ for epoch in range(EPOCHS):
     print(log_message)
     logging.info(log_message)
     
-    with open('honest_cnn_metrics.csv', 'a' if epoch > 0 else 'w', newline='') as f:
+    with open('cnn_metrics_fixed.csv', 'a' if epoch > 0 else 'w', newline='') as f:
         writer = csv.writer(f)
         if epoch == 0:
             writer.writerow(['Epoch', 'Train Acc', 'Val Acc', 'Loss', 'Val Loss', 'Time (s)', 'Energy (Wh)'])
         writer.writerow([epoch+1, hist.history['accuracy'][0], hist.history['val_accuracy'][0], 
                          hist.history['loss'][0], hist.history['val_loss'][0], epoch_time, energy_epoch])
 
-# Оценка на тесте
 test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
 logging.info(f"Test Accuracy: {test_acc:.4f}, Test Loss: {test_loss:.4f}")
+print(f"\nTest Accuracy: {test_acc:.4f}, Test Loss: {test_loss:.4f}")
 
-# Пост-тренировочная аналитика
 total_time = sum(history['time_per_epoch'])
 total_energy = sum(history['energy_per_epoch'])
 energy_per_sample = total_energy / len(X_train)
 
 print(f"\nPost-Training Analysis:")
-print(f"Test Accuracy: {test_acc:.4f}")
 print(f"Total Training Time: {total_time:.1f} s")
 print(f"Total Energy Used: {total_energy:.2f} Wh")
 print(f"Energy per Sample: {energy_per_sample:.6f} Wh/sample")
 print(f"FLOPs per Sample: {flops_per_sample:,}")
 print(f"Total FLOPs: {total_flops:,}")
 
-# Эквивалент спайков
-avg_activation = 0.5  # Предположение: 50% нейронов активны (ReLU)
-spike_equiv = avg_activation * 512 * len(X_train) / EPOCHS / BATCH_SIZE
+avg_activation = 0.5
+spike_equiv = avg_activation * (32 * 28 * 28 + 64 * 14 * 14 + 512) * len(X_train) / EPOCHS / BATCH_SIZE
 print(f"Equivalent Spikes/neuron: {spike_equiv:.2f}")
 
-# Память
 memory_weights = sum([w.nbytes for w in model.get_weights()]) / 1024 / 1024
-memory_activations = (BATCH_SIZE * 512 * 4) / 1024 / 1024  # float32
+memory_activations = (BATCH_SIZE * (32 * 28 * 28 + 64 * 14 * 14 + 512) * 4) / 1024 / 1024
 print(f"Memory (Weights): {memory_weights:.2f} MB")
 print(f"Memory (Activations): {memory_activations:.2f} MB")
 
-# Графики
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+cm = confusion_matrix(y_test, y_pred_classes)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=range(10), yticklabels=range(10))
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.savefig('confusion_matrix_fixed.png')
+plt.close()
+
 plt.figure(figsize=(20, 15))
 
 plt.subplot(3, 3, 1)
@@ -131,7 +159,7 @@ plt.xlabel("Epoch")
 plt.legend()
 
 plt.subplot(3, 3, 3)
-plt.plot([spike_equiv] * EPOCHS)
+plt.plot([spike_equiv] * len(history['accuracy']))
 plt.title("Equivalent Spike Rate (Spikes/neuron)")
 plt.xlabel("Epoch")
 
@@ -146,7 +174,7 @@ plt.title("Energy per Epoch (Wh)")
 plt.xlabel("Epoch")
 
 plt.subplot(3, 3, 6)
-plt.plot([history['accuracy'][i] - history['val_accuracy'][i] for i in range(EPOCHS)])
+plt.plot([history['accuracy'][i] - history['val_accuracy'][i] for i in range(len(history['accuracy']))])
 plt.title("Train-Val Accuracy Gap")
 plt.xlabel("Epoch")
 
@@ -156,43 +184,15 @@ plt.title("Cumulative Energy (Wh)")
 plt.xlabel("Epoch")
 
 plt.subplot(3, 3, 8)
-plt.plot([INIT_LR * spike_equiv for _ in range(EPOCHS)])
+plt.plot([INIT_LR * spike_equiv for _ in range(len(history['accuracy']))])
 plt.title("Learning Rate * Spike Rate")
 plt.xlabel("Epoch")
 
 plt.subplot(3, 3, 9)
-plt.plot([history['loss'][i] / (spike_equiv + 1e-5) for i in range(EPOCHS)])
+plt.plot([history['loss'][i] / (spike_equiv + 1e-5) for i in range(len(history['accuracy']))])
 plt.title("Loss per Spike")
 plt.xlabel("Epoch")
 
 plt.tight_layout()
-plt.show()
-
-
-# Почему этот код максимально честный?
-# 1. Одинаковое количество параметров
-# Ижикевич: Веса: ( 784 \times 512 + 512 \times 10 = 401,920 + 5,120 = 407,040 ). CNN: Веса: ( 784 \times 512 + 512 \times 10 = 401,920 + 5,120 = 407,040 ). Почему это важно: Количество параметров определяет емкость модели. Если бы у CNN было больше параметров (например, из-за сложных свёрточных слоев), она могла бы иметь несправедливое преимущество. Здесь обе модели имеют идентичное число весов, что делает их сравнение честным с точки зрения сложности.
-# 2. Схожая структура сети
-# Ижикевич: Два слоя — входной (784) → скрытый (512) → выходной (10). CNN: Два слоя — Flatten (784) → Dense (512) → Dense (10). Почему это важно: Я убрал свёрточные слои и пулинг, которые могли бы дать CNN преимущество за счет извлечения пространственных признаков. Вместо этого CNN работает как полносвязная сеть, аналогично Ижикевичу, где входные пиксели напрямую передаются в скрытый слой.
-# 3. Одинаковые гиперпараметры
-# Эпохи: Обе модели обучаются 30 эпох. Размер батча: ( BATCH_SIZE = 128 ) в обоих случаях. Оптимизатор: Adam с ( INITLR = 0.02 ), ( \beta1 = 0.9 ), ( \beta_2 = 0.999 ) — те же параметры, что у Ижикевича в финальной версии. Dropout: 30% в обеих моделях для контроля переобучения. Почему это важно: Одинаковые условия обучения исключают влияние внешних факторов (например, более быстрая сходимость из-за меньшего шага обучения или большего числа эпох).
-# 4. Те же данные
-# Ижикевич: MNIST, 784 пикселя, нормализованные в [0, 1]. CNN: MNIST, 28x28x1, нормализованные в [0, 1]. Почему это важно: Обе модели получают идентичный входной сигнал (пиксели MNIST), хотя Ижикевич преобразует их в спайки через rate coding, а CNN использует их напрямую. Это честно, так как входные данные не модифицированы в пользу одной из моделей.
-# 5. Отсутствие архитектурных "читов"
-# CNN: Нет свёрточных слоев, пулинга или дополнительных скрытых слоев, которые могли бы повысить точность за счет пространственной обработки или глубины. Почему это важно: Типичная CNN на MNIST (с Conv2D и MaxPooling) легко достигает 98–99%, но это было бы нечестно, так как Ижикевич ограничен двумя слоями и спайковой динамикой. Я убрал эти преимущества, сделав CNN максимально близкой к Ижикевичу по структуре.
-# 6. Сравнимая вычислительная среда
-# Ижикевич: Использует CuPy на GPU (RTX 4060 Ti). CNN: Использует TensorFlow с GPU-поддержкой (RTX 4060 Ti). Почему это важно: Обе модели работают на одной аппаратной платформе, что исключает влияние разницы в производительности CPU vs GPU.
-# 7. Аналитика для справедливого сравнения
-# Код включает метрики (точность, время, энергия, FLOPs, память, эквивалент спайков), которые напрямую сравнимы с Ижикевичем. Например: FLOPs: Подсчитаны для каждого слоя, чтобы сравнить вычислительную сложность. Энергия: Оценена через TDP и время, как у Ижикевича. Спайки: Эквивалент спайков для CNN рассчитан как доля активных нейронов (ReLU), чтобы связать с метрикой Ижикевича.
-# Возможные возражения и ответы
-# "CNN все равно точнее из-за непрерывных активаций":
-# Да, это правда — ReLU и softmax дают преимущество в точности (ожидаемо 90–95% vs 76% у Ижикевича). Но это не "нечестность", а фундаментальное различие между SNN и ANN. Я минимизировал архитектурные преимущества CNN, чтобы разница была только в принципах работы (спайки vs непрерывность).
-# "Ижикевич использует 50 временных шагов, а CNN нет":
-# Это тоже фундаментальная особенность SNN. Я не мог добавить временные шаги в CNN без превращения ее в RNN, что нарушило бы честность. Вместо этого я сделал CNN максимально простой, чтобы ее вычисления были сравнимы с одним проходом Ижикевича.
-# "CNN не биоправдоподобна":
-# Это не влияет на честность сравнения по эффективности (точность, энергия, время). Биоправдоподобность — преимущество Ижикевича, но ваша задача — сравнение эффективности, а не биологии.
-# Почему это "максимально честно"?
-# Архитектура: CNN повторяет структуру Ижикевича (784 → 512 → 10) без дополнительных слоев. Параметры: Число весов идентично (407,040). Условия: Те же эпохи, батчи, оптимизатор, данные и dropout. Ограничения: Убраны свёртки и пулинг, чтобы CNN не "читерила" за счет пространственных признаков.
-# Если бы я оставил свёрточные слои или увеличил число нейронов, CNN могла бы достичь 98–99%, но это было бы несправедливо, так как Ижикевич ограничен своей спайковой природой и двухслойной архитектурой. Моя цель — показать, как обе модели работают в максимально схожих условиях, чтобы вы могли оценить их эффективность (точность, энергию, время) без перекоса.
-
-
+plt.savefig('cnn_training_analysis_fixed.png')
+plt.close()

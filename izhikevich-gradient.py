@@ -3,6 +3,8 @@ import cupy as cp
 from sklearn.datasets import fetch_openml
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 from tqdm import tqdm
 import time
 import matplotlib.pyplot as plt
@@ -10,7 +12,7 @@ import csv
 
 # Параметры
 INPUT_SIZE = 784
-HIDDEN_SIZE = 512
+HIDDEN_SIZE = 1024
 OUTPUT_SIZE = 10
 TIME_STEPS = 50
 EPOCHS = 30
@@ -156,7 +158,7 @@ class IzhikevichSNN:
             acc = correct / len(X_shuffled)
             avg_loss = total_loss / (len(X_shuffled) / BATCH_SIZE)
             spike_rate = total_spikes / (len(X_shuffled) * HIDDEN_SIZE * TIME_STEPS)
-            val_acc = self.evaluate(X_val_gpu, y_val)
+            val_acc = self.evaluate(X_val_gpu, y_val)[0]
             epoch_time = time.time() - start_time
             energy_epoch = TDP * (epoch_time / 3600)  # Вт·ч
             
@@ -179,6 +181,8 @@ class IzhikevichSNN:
     def evaluate(self, X_test, y_test):
         correct = 0
         total = 0
+        all_preds = []
+        all_labels = []
         for i in range(0, len(X_test), BATCH_SIZE):
             batch_X = cp.asarray(X_test[i:i+BATCH_SIZE])
             batch_y = y_test[i:i+BATCH_SIZE]
@@ -186,7 +190,11 @@ class IzhikevichSNN:
             preds = cp.argmax(output, axis=1)
             correct += cp.sum(preds == cp.asarray(batch_y)).get()
             total += batch_y.shape[0]
-        return correct / total
+            all_preds.append(preds.get())
+            all_labels.append(batch_y)
+        all_preds = np.concatenate(all_preds)
+        all_labels = np.concatenate(all_labels)
+        return correct / total, all_preds, all_labels
 
     def post_training_analysis(self, X_train):
         # Общее время и энергия
@@ -209,6 +217,18 @@ class IzhikevichSNN:
         memory_activations = (BATCH_SIZE * HIDDEN_SIZE * TIME_STEPS * 4) / 1024 / 1024  # float32
         print(f"Memory (Weights): {memory_weights:.2f} MB")
         print(f"Memory (Activations): {memory_activations:.2f} MB")
+        
+        # Confusion Matrix
+        _, all_preds, all_labels = self.evaluate(self.scaler.transform(X_test), y_test)
+        cm = confusion_matrix(all_labels, all_preds)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=range(10), yticklabels=range(10))
+        plt.title('Confusion Matrix')
+        plt.xlabel('Predicted Label')
+        plt.ylabel('True Label')
+        plt.savefig('confusion_matrix.png')
+        plt.close()
         
         # Графики
         plt.figure(figsize=(20, 15))
@@ -261,7 +281,8 @@ class IzhikevichSNN:
         plt.xlabel("Epoch")
         
         plt.tight_layout()
-        plt.show()
+        plt.savefig('training_analysis.png')
+        plt.close()
 
 # Проверка GPU
 print("Initializing GPU...")
@@ -283,7 +304,7 @@ snn = IzhikevichSNN()
 print("\nTraining SNN...")
 snn.train(X_train, y_train, X_val, y_val)
 
-test_acc = snn.evaluate(snn.scaler.transform(X_test), y_test)
+test_acc, _, _ = snn.evaluate(snn.scaler.transform(X_test), y_test)
 print(f"Test Accuracy: {test_acc:.4f}")
 
 # Аналитика после тренировки

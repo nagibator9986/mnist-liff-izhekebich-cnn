@@ -1,274 +1,341 @@
-# Проект: Сравнение спайковых и традиционных нейронных сетей на MNIST
+# MNIST Classification with Spiking and Artificial Neural Networks
 
-Этот проект содержит несколько реализаций нейронных сетей для классификации изображений из датасета MNIST (рукописные цифры). Включает спайковые нейронные сети (SNN) с использованием модели Ижикевича и библиотек Brian2 и CuPy, а также "честную" CNN на TensorFlow для сравнения. Каждый файл представляет собой отдельный эксперимент с детальной аналитикой производительности, энергопотребления и вычислительных затрат.
-
-## Общие требования
-
-### Аппаратное обеспечение
-- **GPU**: NVIDIA RTX 4060 Ti (или другой GPU с поддержкой CUDA).
-- **Операционная система**: Windows, Linux или macOS (Windows используется в примерах).
-- **Оперативная память**: Минимум 16 ГБ.
-- **Диск**: Минимум 10 ГБ свободного места для установки зависимостей и хранения логов.
-
-### Программное обеспечение
-- **Python**: Версия 3.8–3.10 (рекомендуется 3.9 для совместимости).
-- **CUDA Toolkit**: Версия, совместимая с вашим GPU (например, CUDA 11.8 для RTX 4060 Ti).
-- **cuDNN**: Для работы TensorFlow и CuPy с GPU (например, cuDNN 8.6 для CUDA 11.8).
-- **pip**: Для установки зависимостей.
-
-### Установка общих зависимостей
-1. Установите Python 3.9 (или другую совместимую версию):
-   - Windows: Скачайте установщик с [официального сайта Python](https://www.python.org/downloads/) и установите, добавив Python в PATH.
-   - Linux: `sudo apt update && sudo apt install python3.9 python3-pip`.
-   - macOS: `brew install python@3.9`.
-
-2. Установите CUDA Toolkit и cuDNN:
-   - Скачайте CUDA Toolkit с [сайта NVIDIA](https://developer.nvidia.com/cuda-downloads) (например, 11.8).
-   - Скачайте cuDNN с [сайта NVIDIA](https://developer.nvidia.com/cudnn) (требуется регистрация), распакуйте и скопируйте файлы в папку CUDA (например, `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8` на Windows).
-   - Добавьте CUDA в PATH:
-     - Windows: Добавьте `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin` в переменную окружения PATH.
-     - Linux/macOS: `export PATH=/usr/local/cuda-11.8/bin:$PATH`.
-
-3. Создайте виртуальное окружение:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
-   ```
-
-4. Установите зависимости из `requirements.txt`:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Содержимое `requirements.txt`:
-   ```
-   brian2
-   numpy
-   sklearn
-   cupy
-   tqdm
-   matplotlib
-   tensorflow
-   ```
-   **Примечание**: Если возникают проблемы с `cupy`, установите версию, совместимую с вашей CUDA (например, `pip install cupy-cuda118` для CUDA 11.8). Для TensorFlow может потребоваться `tensorflow-gpu` (устанавливается автоматически, если CUDA настроен).
+This repository provides implementations of Spiking Neural Networks (SNNs) and Artificial Neural Networks (ANNs) for classifying the MNIST dataset. The SNNs are based on the Izhikevich neuron model (with gradient-based and STDP learning) and the Brian2 library, while the ANNs include a multilayer perceptron (MLP) and a convolutional neural network (CNN). Additional scripts support evaluation and weight generation for the Brian2 SNN. This README details each file, its functionality, installation requirements, and execution instructions.
 
 ---
 
-## Файл 1: `brian2_snn.py` — SNN с использованием Brian2
+## File Descriptions
 
-### Описание
-Этот скрипт реализует спайковую нейронную сеть (SNN) для классификации MNIST, используя библиотеку Brian2. Сеть включает входной слой (784 нейрона), возбудительный слой (1600 нейронов) и тормозной слой (1600 нейронов). Обучение основано на STDP (Spike-Timing-Dependent Plasticity) с использованием LIF либо `PoissonGroup`, либо `SpikeGeneratorGroup` для генерации входных спайков. Код включает этапы обучения, присвоения меток нейронам и тестирования.
+### 1. `izhikevich-gradient.py`
+#### Overview
+Implements a Spiking Neural Network (SNN) using the Izhikevich neuron model for MNIST classification. The network has a two-layer architecture (784 input → 1024 hidden → 10 output) and is trained with gradient-based learning using a surrogate gradient and the Adam optimizer. Inputs are encoded as spike trains over 50 time steps. Metrics (accuracy, loss, spike rate, energy) are logged, and visualizations are generated.
 
-### Зависимости
-- `brian2`: Для моделирования SNN.
-- `numpy`: Для числовых вычислений.
-- `sklearn`: Для загрузки и предобработки данных MNIST.
-- `time`: Стандартная библиотека Python.
-- `os`: Стандартная библиотека Python.
+#### Key Features
+- **Architecture**: 784 input → 1024 hidden → 10 output.
+- **Learning**: Adam optimizer (`INIT_LR=0.02`, `BETA1=0.9`, `BETA2=0.999`) with surrogate gradient.
+- **Input Encoding**: Rate-based spike trains.
+- **Metrics**: Training/validation accuracy, loss, spike rate, energy (based on RTX 4060 Ti TDP of 160W), FLOPs, memory.
+- **Outputs**: `training_metrics.csv`, `confusion_matrix.png`, `training_analysis.png`.
 
-### Установка
-1. Убедитесь, что общие зависимости установлены (см. выше).
-2. Если вы ещё не активировали виртуальное окружение:
+#### Requirements
+```
+numpy
+cupy
+scikit-learn
+seaborn
+tqdm
+matplotlib
+```
+
+#### Installation
+1. Install dependencies:
    ```bash
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
+   pip install numpy cupy scikit-learn seaborn tqdm matplotlib
    ```
-
-### Запуск
-1. Сохраните код в файл `brian2_snn.py`.
-2. Настройте локаль для корректного вывода UTF-8 (особенно важно для Windows):
+2. Install CuPy for your CUDA version (e.g., CUDA 11.x for RTX 4060 Ti):
    ```bash
-   chcp 65001           # Windows: Переключение на UTF-8
-   set PYTHONUTF8=1     # Windows: Включение UTF-8 в Python
+   pip install cupy-cuda11x
    ```
-3. Запустите скрипт с перенаправлением вывода в файл (для удобства):
+   If `pip` fails, use Conda:
    ```bash
-   python -X utf8 brian2_snn.py > brian2_output.txt 2>&1
+   conda install cupy -c conda-forge
    ```
-   - `-X utf8`: Указывает Python использовать UTF-8 для корректного вывода.
-   - `> brian2_output.txt 2>&1`: Сохраняет весь вывод (включая ошибки) в файл `brian2_output.txt`.
+3. Install CUDA Toolkit from NVIDIA's website: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads). Ensure compatibility with your GPU (e.g., CUDA 11.x or 12.x for RTX 4060 Ti).
+4. Verify GPU availability with `nvidia-smi`.
 
-### Ожидаемые результаты
-- **Вывод в консоль/файл**:
-  - Загрузка данных MNIST: ~3–5 секунд.
-  - Количество подключённых синапсов: 1,254,400.
-  - Начальные веса: Средний вес ~0.2501, максимальный вес ~0.5000.
-  - Обучение на 60,000 примерах (30 эпох).
-  - После каждой эпохи: Логирование метрик (спайки, веса, потенциалы, `theta`) в файл `training_log.txt`.
-  - Присвоение меток: Распределение нейронов по классам (0–9).
-  - Точность на тесте: Ожидается ~76% (на основе предыдущих экспериментов).
-- **Файлы**:
-  - `training_log.txt`: Метрики после каждой эпохи (спайки, веса, потенциалы, `theta`).
+#### Running the Script
+1. Save as `izhikevich-gradient.py`.
+2. Run:
+   ```bash
+   python izhikevich-gradient.py
+   ```
+3. The script will:
+   - Download MNIST via `fetch_openml`.
+   - Train for 30 epochs (batch size 128).
+   - Save metrics and visualizations.
+   - Print training progress, test accuracy, and analysis.
 
-### Возможные проблемы
-- **Ошибка с `SpikeGeneratorGroup`**: Если возникает ошибка о множественных спайках в одном временном шаге, переключитесь на `PoissonGroup` (версия кода с `PoissonGroup` уже предоставлена).
-- **Кодировка**: Если вывод в консоли некорректен, проверьте настройки локали (`chcp 65001` и `set PYTHONUTF8=1`).
+#### Notes
+- Requires a CUDA-capable GPU. For CPU-only, replace `cp` with `np` and remove GPU code.
+- Adjust `TDP` (default: 160W) for your GPU.
+- Internet connection needed for MNIST download.
 
 ---
 
-## Файл 2: `izhikevich_stdp.py` — SNN с Ижикевичем (STDP/Hebbian)
+### 2. `izhikevichSTDP.py`
+#### Overview
+Implements an Izhikevich SNN for MNIST classification with STDP for input-to-hidden weights and Hebbian learning for hidden-to-output weights. The network has a smaller hidden layer (512 neurons) and 20 time steps. It logs detailed metrics (weight variances, STDP/Hebbian changes) and generates visualizations.
 
-### Описание
-Этот скрипт реализует SNN с моделью нейронов Ижикевича, оптимизированную для работы на GPU с помощью CuPy. Сеть состоит из входного слоя (784 нейрона), скрытого слоя (2048 нейронов) и выходного слоя (10 нейронов). Обучение использует STDP для входного слоя и геббовское обучение с учителем для выходного слоя. Включает аналитику энергопотребления, FLOPs и памяти.
+#### Key Features
+- **Architecture**: 784 input → 512 hidden → 10 output.
+- **Learning**: STDP (`STDP_LR=0.01`) for input-to-hidden, Hebbian (`HEBBIAN_LR=0.005`) for hidden-to-output.
+- **Input Encoding**: Rate-based spike trains.
+- **Metrics**: Accuracy, spike rate, energy, mean currents, weight variances, outputs per class, weight changes.
+- **Outputs**: `training_metrics_stdp.csv`, `confusion_matrix.png`, `training_analysis.png`.
 
-### Зависимости
-- `cupy`: Для вычислений на GPU.
-- `sklearn`: Для загрузки MNIST, предобработки и разделения данных.
-- `tqdm`: Для прогресс-бара.
-- `matplotlib`: Для визуализации.
-- `csv`: Стандартная библиотека Python.
-- `datetime`: Стандартная библиотека Python.
+#### Requirements
+```
+numpy
+cupy
+scikit-learn
+seaborn
+tqdm
+matplotlib
+```
 
-### Установка
-1. Убедитесь, что общие зависимости установлены (см. выше).
-2. Убедитесь, что CUDA Toolkit и cuDNN настроены (см. выше).
-3. Если вы ещё не активировали виртуальное окружение:
+#### Installation
+Same as `izhikevich-gradient.py`:
+```bash
+pip install numpy cupy scikit-learn seaborn tqdm matplotlib
+pip install cupy-cuda11x
+```
+Or via Conda:
+```bash
+conda install cupy -c conda-forge
+```
+Install CUDA Toolkit: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
+
+#### Running the Script
+1. Save as `izhikevichSTDP.py`.
+2. Run:
    ```bash
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
+   python izhikevichSTDP.py
    ```
+3. The script will:
+   - Download MNIST.
+   - Train for 30 epochs.
+   - Save metrics and visualizations.
+   - Print results.
 
-### Запуск
-1. Сохраните код в файл `izhikevich_stdp.py`.
-2. Запустите скрипт:
-   ```bash
-   python izhikevich_stdp.py > izhikevich_stdp_output.txt 2>&1
-   ```
-   - `> izhikevich_stdp_output.txt 2>&1`: Сохраняет вывод в файл.
-
-### Ожидаемые результаты
-- **Вывод в консоль/файл**:
-  - Инициализация GPU: Укажет вашу GPU (например, "NVIDIA GeForce RTX 4060 Ti").
-  - Загрузка MNIST: ~3–5 секунд.
-  - Обучение на 50,400 примерах (30 эпох).
-  - После каждой эпохи: Точность на тренировочной и валидационной выборках, частота спайков, время, энергопотребление.
-  - Финальная точность на тесте: Ожидается 40-50%.
-  - Пост-тренировочная аналитика: Общее время, энергия, FLOPs, память.
-- **Файлы**:
-  - `training_metrics_YYYYMMDD_HHMMSS.csv`: Метрики по эпохам (точность, спайки, время, энергия).
-  - `training_analysis.png`: Графики (точность, спайки, время, энергия).
-
-### Возможные проблемы
-- **Ошибка CUDA**: Если CuPy не находит CUDA, проверьте установку CUDA Toolkit и драйверов NVIDIA.
-- **Переполнение памяти GPU**: Если RTX 4060 Ti (8 ГБ) переполняется, уменьшите `BATCH_SIZE` (например, до 64).
+#### Notes
+- GPU required for CuPy. CPU adaptation possible.
+- STDP increases computational load.
+- Adjust `TDP` as needed.
 
 ---
 
-## Файл 3: `izhikevich_gradient.py` — SNN с Ижикевичем (суррогатный градиент)
+### 3. `mlp.py`
+#### Overview
+Implements a Multilayer Perceptron (MLP) using TensorFlow for MNIST classification, designed to match the Izhikevich SNNs in parameter count (407,040) for fair comparison. It uses a two-layer architecture (784 → 512 → 10) with ReLU, dropout, and softmax.
 
-### Описание
-Этот скрипт реализует SNN с моделью Ижикевича, используя суррогатный градиент для обучения с помощью метода обратного распространения ошибки. Сеть имеет входной слой (784 нейрона), скрытый слой (512 нейронов) и выходной слой (10 нейронов). Оптимизация выполняется с помощью Adam. Код включает детальную аналитику: точность, спайки, энергопотребление, FLOPs, память.
+#### Key Features
+- **Architecture**: 784 → Dense (512, ReLU) → Dropout (0.3) → Dense (10, softmax).
+- **Learning**: Adam (`INIT_LR=0.02`, `beta_1=0.9`, `beta_2=0.999`).
+- **Metrics**: Accuracy, loss, energy, FLOPs, memory, equivalent spike rate (50% ReLU activation).
+- **Outputs**: `honest_cnn_metrics.csv`, `confusion_matrix.png`, `training_analysis.png`.
 
-### Зависимости
-- `cupy`: Для вычислений на GPU.
-- `sklearn`: Для загрузки MNIST, предобработки и разделения данных.
-- `tqdm`: Для прогресс-бара.
-- `matplotlib`: Для визуализации.
-- `csv`: Стандартная библиотека Python.
+#### Requirements
+```
+numpy
+tensorflow
+scikit-learn
+seaborn
+matplotlib
+```
 
-### Установка
-1. Убедитесь, что общие зависимости установлены (см. выше).
-2. Убедитесь, что CUDA Toolkit и cuDNN настроены (см. выше).
-3. Если вы ещё не активировали виртуальное окружение:
+#### Installation
+```bash
+pip install numpy tensorflow scikit-learn seaborn matplotlib
+```
+Install CUDA Toolkit and cuDNN for GPU support: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
+
+#### Running the Script
+1. Save as `mlp.py`.
+2. Run:
    ```bash
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
+   python mlp.py
    ```
+3. The script will:
+   - Download MNIST.
+   - Train for 30 epochs.
+   - Save metrics, visualizations, and logs (`honest_cnn_log.log`).
+   - Print results.
 
-### Запуск
-1. Сохраните код в файл `izhikevich_gradient.py`.
-2. Запустите скрипт:
-   ```bash
-   python izhikevich_surrogate.py > izhikevich_surrogate_output.txt 2>&1
-   ```
-   - `> izhikevich_surrogate_output.txt 2>&1`: Сохраняет вывод в файл.
-
-### Ожидаемые результаты
-- **Вывод в консоль/файл**:
-  - Инициализация GPU: Укажет вашу GPU.
-  - Загрузка MNIST: ~3–5 секунд.
-  - Обучение на 50,400 примерах (30 эпох).
-  - После каждой эпохи: Точность, потеря, спайки, время, энергопотребление.
-  - Финальная точность на тесте: Ожидается ~70–75%.
-  - Пост-тренировочная аналитика: Общее время, энергия, FLOPs, память, графики.
-- **Файлы**:
-  - `training_metrics.csv`: Метрики по эпохам.
-  - Графики: 9 графиков (точность, потеря, спайки, время, энергия и др.) отображаются в окне.
-
-### Возможные проблемы
-- **Ошибка CUDA**: Аналогично предыдущему файлу.
-- **Графики не отображаются**: Если вы работаете в неинтерактивной среде (например, WSL), добавьте `plt.savefig('training_analysis.png')` вместо `plt.show()`.
+#### Notes
+- GPU support requires CUDA and cuDNN.
+- Matches SNNs in parameters and hyperparameters.
 
 ---
 
-## Файл 4: `honest_cnn.py` — "Честная" CNN на TensorFlow
+### 4. `cnn.py`
+#### Overview
+Implements a Convolutional Neural Network (CNN) using TensorFlow for MNIST classification. Features two convolutional layers (32 and 64 filters), batch normalization, max-pooling, and a dense layer (512 neurons), with early stopping.
 
-### Описание
-Этот скрипт реализует "честную" CNN для сравнения с SNN. Свёрточные слои удалены, чтобы архитектура соответствовала SNN (784 → 512 → 10). Обучение выполняется с помощью Adam, с той же структурой данных (50,400 тренировочных, 5,600 валидационных, 14,000 тестовых примеров). Включает аналитику: точность, энергопотребление, FLOPs, память, эквивалент спайков.
+#### Key Features
+- **Architecture**: Conv2D (32, 3x3) → BatchNorm → MaxPool → Conv2D (64, 3x3) → BatchNorm → MaxPool → Dense (512, ReLU) → Dropout (0.3) → Dense (10, softmax).
+- **Learning**: Adam (`INIT_LR=0.001`, `beta_1=0.9`, `beta_2=0.999`), early stopping (patience=5).
+- **Metrics**: Accuracy, loss, energy, FLOPs, memory, equivalent spike rate.
+- **Outputs**: `cnn_metrics_fixed.csv`, `confusion_matrix_fixed.png`, `cnn_training_analysis_fixed.png`.
 
-### Зависимости
-- `tensorflow`: Для построения и обучения CNN (с поддержкой GPU).
-- `sklearn`: Для загрузки MNIST и разделения данных.
-- `matplotlib`: Для визуализации.
-- `logging`: Стандартная библиотека Python.
-- `csv`: Стандартная библиотека Python.
-- `time`: Стандартная библиотека Python.
+#### Requirements
+```
+numpy
+tensorflow
+scikit-learn
+seaborn
+matplotlib
+```
 
-### Установка
-1. Убедитесь, что общие зависимости установлены (см. выше).
-2. Убедитесь, что CUDA Toolkit и cuDNN настроены (см. выше).
-3. Если вы ещё не активировали виртуальное окружение:
+#### Installation
+```bash
+pip install numpy tensorflow scikit-learn seaborn matplotlib
+```
+Install CUDA Toolkit and cuDNN: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
+
+#### Running the Script
+1. Save as `cnn.py`.
+2. Run:
    ```bash
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
+   python cnn.py
    ```
+3. The script will:
+   - Download MNIST.
+   - Train for up to 30 epochs with early stopping.
+   - Save metrics, visualizations, and logs (`cnn_log_fixed.log`).
+   - Print results.
 
-### Запуск
-1. Сохраните код в файл `honest_cnn.py`.
-2. Запустите скрипт:
-   ```bash
-   python honest_cnn.py > honest_cnn_output.txt 2>&1
-   ```
-   - `> honest_cnn_output.txt 2>&1`: Сохраняет вывод в файл.
-
-### Ожидаемые результаты
-- **Вывод в консоль/файл**:
-  - Загрузка MNIST: ~3–5 секунд.
-  - Обучение на 50,400 примерах (30 эпох).
-  - После каждой эпохи: Точность, потеря, время, энергопотребление.
-  - Финальная точность на тесте: Ожидается ~90–95% (выше, чем у SNN, из-за непрерывных активаций).
-  - Пост-тренировочная аналитика: Общее время, энергия, FLOPs, память, эквивалент спайков.
-- **Файлы**:
-  - `honest_cnn_log.log`: Логи обучения.
-  - `honest_cnn_metrics.csv`: Метрики по эпохам.
-  - Графики: 9 графиков (точность, потеря, спайки, время, энергия и др.).
-
-### Возможные проблемы
-- **Ошибка TensorFlow GPU**: Если TensorFlow не видит GPU, проверьте установку CUDA и cuDNN. Возможно, нужно установить `tensorflow-gpu` явно.
-- **Переполнение памяти**: Если RTX 4060 Ti переполняется, уменьшите `BATCH_SIZE`.
+#### Notes
+- Lower `INIT_LR=0.001` for stability.
+- GPU support enhances performance.
 
 ---
 
-## Общее сравнение
+### 5. `MNIST_Brian2.py`
+#### Overview
+Implements an SNN using Brian2 for MNIST classification. Features a Poisson input layer (784 neurons), excitatory and inhibitory layers (n_e and n_i neurons), and an optional second excitatory layer (n_e2). Uses STDP and CPU parallelization.
 
-### Производительность
-- **Brian2 SNN**: ~76% точности, высокая биоправдоподобность, медленное обучение (~10–20 минут на 30 эпох).
-- **Ижикевич (STDP/Hebbian)**: ~70–75% точности, быстрее благодаря GPU (~5–10 минут).
-- **Ижикевич (суррогатный градиент)**: ~70–75% точности, ещё быстрее (~3–5 минут).
-- **CNN**: ~90–95% точности, самое быстрое обучение (~1–2 минуты).
+#### Key Features
+- **Architecture**: 784 Poisson → Excitatory (n_e) + Inhibitory (n_i) → Optional Excitatory (n_e2).
+- **Learning**: STDP with adaptive thresholds and weight normalization.
+- **Input Encoding**: Poisson spike rates.
+- **Metrics**: Accuracy, memory usage.
+- **Outputs**: Weights (`XeAe.npy`, etc.), activity (`result_monitor_*.npy`), checkpoints, `weights.png`, `accuracy.png`.
 
-### Энергопотребление
-- Рассчитывается на основе TDP (160 Вт) и времени обучения. CNN потребляет меньше энергии из-за меньшего времени, несмотря на отсутствие спайковой экономии.
+#### Requirements
+```
+numpy
+brian2
+matplotlib
+pickle
+gzip
+psutil
+argparse
+```
 
-### Вычислительная сложность
-- SNN: Высокая сложность из-за временных шагов (например, 50 шагов в `izhikevich_surrogate.py`).
-- CNN: Меньше FLOPs благодаря отсутствию временной динамики.
+#### Installation
+```bash
+pip install numpy brian2 matplotlib psutil cython
+```
+Note: `pickle`, `gzip`, `argparse` are standard. Install a C++ compiler if needed (e.g., `build-essential` on Ubuntu).
+
+#### Running the Script
+1. Save as `MNIST_Brian2.py`.
+2. Ensure MNIST data (.pkl.gz) is in `mnist_path` (default: `./mnist/`).
+3. Generate weights with `MNIST_random_conn_generator.py` in `data_path` (default: `./`).
+4. Run:
+   ```bash
+   python MNIST_Brian2.py --mnist_path ./mnist/ --data_path ./ --save_path ./results/
+   ```
+5. Optional arguments:
+   - `--n_e`: Excitatory neurons (default: 400).
+   - `--n_e2`: Second-layer neurons (default: 200).
+   - `--num_examples`: Examples (default: 60000).
+   - `--test_mode`: Use pre-trained weights.
+
+#### Notes
+- Requires .pkl.gz MNIST data.
+- Adjust `num_threads` for CPU parallelization.
 
 ---
 
-## Дополнительные рекомендации
+### 6. `MNIST_evaluation.py`
+#### Overview
+Evaluates the Brian2 SNN from `MNIST_Brian2.py`. Loads spike monitors and labels, assigns classes, computes test accuracy, and visualizes results (confusion matrix, error examples, neuron assignments).
 
-- **Оптимизация производительности**: Если обучение SNN слишком медленное, попробуйте уменьшить `HIDDEN_SIZE` или использовать меньшее количество временных шагов.
-- **Логирование**: Для долгосрочных экспериментов настройте ротацию логов, чтобы избежать переполнения диска.
-- **Визуализация**: Если графики не отображаются, замените `plt.show()` на `plt.savefig()` с указанием имени файла.
+#### Key Features
+- **Functionality**: Test accuracy, confusion matrix, misclassified examples, neuron assignments.
+- **Inputs**: `result_monitor_final.npy`, `input_numbers_final.npy`.
+- **Outputs**: `confusion_matrix.png`, `error_examples.png`, `assignments.png`.
 
+#### Requirements
+```
+numpy
+matplotlib
+scikit-learn
+seaborn
+pickle
+gzip
+argparse
+```
+
+#### Installation
+```bash
+pip install numpy matplotlib scikit-learn seaborn
+```
+
+#### Running the Script
+1. Save as `MNIST_evaluation.py`.
+2. Ensure Brian2 results are in `save_path` (default: `./results/`).
+3. Ensure .pkl.gz MNIST data is in `mnist_path` (default: `./mnist/`).
+4. Run:
+   ```bash
+   python MNIST_evaluation.py --mnist_path ./mnist/ --save_path ./results/
+   ```
+5. Optional arguments:
+   - `--n_e`: Excitatory neurons (default: 400).
+   - `--n_e2`: Second-layer neurons (default: 200).
+   - `--num_examples`: Test examples (default: 10000).
+
+#### Notes
+- Requires Brian2 results.
+- CPU-based, no GPU needed.
+
+---
+
+### 7. `MNIST_random_conn_generator.py`
+#### Overview
+Generates initial random weights for the Brian2 SNN. Creates sparse weight matrices for input-to-excitatory (`XeAe`), input-to-inhibitory (`XeAi`), excitatory-to-inhibitory (`AeAi`), and inhibitory-to-excitatory (`AiAe`) connections.
+
+#### Key Features
+- **Functionality**: Sparse weight matrices with specified connection probabilities.
+- **Outputs**: `XeAe.npy`, `XeAi.npy`, `AeAi.npy`, `AiAe.npy`.
+
+#### Requirements
+```
+numpy
+argparse
+```
+
+#### Installation
+```bash
+pip install numpy
+```
+
+#### Running the Script
+1. Save as `MNIST_random_conn_generator.py`.
+2. Run:
+   ```bash
+   python MNIST_random_conn_generator.py --data_path ./random/
+   ```
+3. Optional arguments:
+   - `--n_e`: Excitatory neurons (default: 400).
+   - `--data_path`: Save path (default: `./random/`).
+
+#### Notes
+- Run before `MNIST_Brian2.py`.
+- Ensure `data_path` matches `MNIST_Brian2.py`.
+
+---
+
+## General Setup
+- **Python Version**: Use Python 3.7+.
+- **GPU Support**: For `izhikevich*`, `mlp.py`, `cnn.py`, install CUDA Toolkit and cuDNN from [NVIDIA](https://developer.nvidia.com/cuda-downloads). Verify with `nvidia-smi`.
+- **Conda Alternative**: If `pip` fails for CuPy, use:
+  ```bash
+  conda install cupy -c conda-forge
+  ```
+- **Data**: `izhikevich*`, `mlp.py`, `cnn.py` download MNIST via `fetch_openml`. `MNIST_Brian2.py` and `MNIST_evaluation.py` require .pkl.gz MNIST data.
+- **Permissions**: Ensure write access for saving outputs.
+- **Customization**: Adjust hyperparameters and paths as needed.
+
+For issues, contact the repository maintainer or open an issue.

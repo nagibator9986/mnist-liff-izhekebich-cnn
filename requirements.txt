@@ -1,4 +1,13 @@
-tensorflow==2.12.0
-numpy==1.23.5
-pillow==9.5.0
-tk
+numpy
+cupy
+tensorflow
+scikit-learn
+seaborn
+tqdm
+matplotlib
+brian2
+psutil
+argparse
+pickle
+gzip
+tkinter
