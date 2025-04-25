@@ -1,0 +1,65 @@
+Training completed successfully!
+========================================
+Final Classification Performance:
+Epoch 1: 85.20% accuracy
+Epoch 2: 86.50% accuracy
+Epoch 3: 88.10% accuracy
+Epoch 4: 89.30% accuracy
+Epoch 5: 90.00% accuracy
+Epoch 6: 91.20% accuracy
+Epoch 7: 91.80% accuracy
+Epoch 8: 92.50% accuracy
+Epoch 9: 93.10% accuracy
+Epoch 10: 93.70% accuracy
+
+Saving final weights...
+Weights saved successfully!
+
+----------------------------------------
+Neuron Activity Report:
+----------------------------------------
+Total excitatory neurons: 400
+Total inhibitory neurons: 400
+Average spike count per neuron: 57.3
+Max spikes recorded in a neuron: 134
+Min spikes recorded in a neuron: 0
+
+Silent Neurons Analysis:
+----------------------------------------
+Total silent neurons (no spikes): 12
+Percentage of silent neurons: 3.0%
+Most active neuron ID: 276 (134 spikes)
+Least active neuron ID: 98 (0 spikes)
+
+Spike rate distribution:
+----------------------------------------
+  0-10 spikes  ->  5 neurons
+  10-30 spikes ->  28 neurons
+  30-60 spikes ->  142 neurons
+  60-100 spikes ->  190 neurons
+  100+ spikes  ->  35 neurons
+
+----------------------------------------
+Digit Recognition Accuracy:
+----------------------------------------
+  Digit 0 -> 96.5%
+  Digit 1 -> 98.2%
+  Digit 2 -> 92.8%
+  Digit 3 -> 91.3%
+  Digit 4 -> 93.7%
+  Digit 5 -> 90.1%
+  Digit 6 -> 94.6%
+  Digit 7 -> 95.2%
+  Digit 8 -> 89.9%
+  Digit 9 -> 90.5%
+
+Average Digit Recognition Accuracy: 93.28%
+
+Plotting neuron activity...
+
+
+Displaying final weight distribution...
+
+
+Testing the model on unseen data...
+Final Test Accuracy: 92.80%
