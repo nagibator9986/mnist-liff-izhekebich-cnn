@@ -10,7 +10,10 @@ import gzip
 
 def get_labeled_data(path, bTrain=True):
     """Загружает данные MNIST."""
-    with gzip.open(os.path.join(path, 'training.pkl.gz' if bTrain else 'testing.pkl.gz'), 'rb') as f:
+    file_name = os.path.join(path, 'training.pkl.gz' if bTrain else 'testing.pkl.gz')
+    if not os.path.exists(file_name):
+        raise FileNotFoundError(f"MNIST file {file_name} not found")
+    with gzip.open(file_name, 'rb') as f:
         data = pickle.load(f)
     return {'X': data[0].reshape((-1, 784)).astype(np.float32), 'y': data[1].astype(np.int32)}
 
@@ -58,7 +61,7 @@ def get_recognized_number_ranking(assignments, spike_rates):
             summed_rates[i] = np.sum(spike_rates[mask]) / num_assignments[i]
     return np.argsort(summed_rates)[::-1]
 
-def plot_2d_input_weights(weights, n_input, n_e, save_path):
+def plot_2d_input_weights(weights, n_input, n_e, save_path, layer_name='layer1'):
     """Визуализирует веса как тепловую карту."""
     weights_2d = weights.reshape((28, 28, n_e))
     fig, axes = plt.subplots(10, 10, figsize=(10, 10))
@@ -66,21 +69,23 @@ def plot_2d_input_weights(weights, n_input, n_e, save_path):
         if i < min(n_e, 100):
             ax.imshow(weights_2d[:, :, i], cmap='hot_r', interpolation='nearest')
             ax.axis('off')
-    plt.savefig(os.path.join(save_path, 'weights.png'))
+    plt.savefig(os.path.join(save_path, f'weights_{layer_name}.png'))
     plt.close()
 
 def main(args):
-    # Настройка Brian2 для максимальной производительности
+    # Настройка многопоточности через переменную окружения
+    os.environ["OMP_NUM_THREADS"] = str(args.num_threads)
+
+    # Настройка Brian2
     set_device('cpp_standalone', directory=None)
     prefs.codegen.target = 'cython'
-    prefs.codegen.cpp.num_threads = args.num_threads  # Параллелизация
     defaultclock.dt = 0.5 * ms
 
     # Параметры
     n_input = 784
     n_e = args.n_e
     n_i = n_e
-    n_e2 = args.n_e2  # Второй слой
+    n_e2 = args.n_e2
     single_example_time = args.example_time * second
     resting_time = args.resting_time * second
     num_examples = args.num_examples
@@ -92,10 +97,10 @@ def main(args):
     test_mode = args.test_mode
     input_intensity = args.input_intensity
     weight_sum = args.weight_sum
-    os.makedirs(save_path, exist_ok=True)
-    os.makedirs(os.path.join(save_path, 'weights'), exist_ok=True)
-    os.makedirs(os.path.join(save_path, 'activity'), exist_ok=True)
-    os.makedirs(os.path.join(save_path, 'checkpoints'), exist_ok=True)
+
+    # Создание директорий
+    for subdir in ['', 'weights', 'activity', 'checkpoints']:
+        os.makedirs(os.path.join(save_path, subdir), exist_ok=True)
 
     # Загрузка данных
     print("Loading MNIST")
@@ -137,39 +142,40 @@ def main(args):
     exc_group.v, inh_group.v = v_rest_e, v_rest_i
     exc_group.theta = np.zeros(n_e) * mV if test_mode else np.ones(n_e) * 20 * mV
 
-    # Второй слой (если n_e2 > 0)
+    # Второй слой
+    exc_group2 = None
     if n_e2 > 0:
         exc_group2 = NeuronGroup(n_e2, neuron_eqs_e, threshold='(v>(theta - 20*mV + v_thresh_e)) and (timer>refrac_e)',
-                               reset='v=v_reset_e; theta+=0.05*mV', refractory=refrac_e, method='euler', name='Ae2')
+                                reset='v=v_reset_e; theta+=0.05*mV', refractory=refrac_e, method='euler', name='Ae2')
         exc_group2.v = v_rest_e
         exc_group2.theta = np.zeros(n_e2) * mV if test_mode else np.ones(n_e2) * 20 * mV
-    else:
-        exc_group2 = None
 
     # Соединения
     connections = {}
     weight_path = os.path.join(data_path, 'weights' if test_mode else 'random')
     connections['XeAe'] = Synapses(input_group, exc_group, model='w : 1', on_pre='ge += w', delay=1*ms)
     w_ee = get_matrix_from_file(os.path.join(weight_path, 'XeAe.npy'), (n_input, n_e))
-    connections['XeAe'].connect(i=np.arange(n_input)[:, None], j=np.arange(n_e)[None, :])
+    connections['XeAe'].connect(True)
     connections['XeAe'].w = w_ee.flatten()
 
     connections['XeAi'] = Synapses(input_group, inh_group, model='w : 1', on_pre='ge += w', delay=1*ms)
     for i, j, w in np.load(os.path.join(weight_path, 'XeAi.npy'), allow_pickle=True):
-        connections['XeAi'].connect(i=int(i), j=int(j))
+        i, j = int(i), int(j)
+        connections['XeAi'].connect(i=i, j=j)
         connections['XeAi'].w[i, j] = w
 
     connections['AeAi'] = Synapses(exc_group, inh_group, model='w : 1', on_pre='ge += w', delay=0*ms)
     for i, j, w in np.load(os.path.join(weight_path, 'AeAi.npy'), allow_pickle=True):
-        connections['AeAi'].connect(i=int(i), j=int(j))
+        i, j = int(i), int(j)
+        connections['AeAi'].connect(i=i, j=j)
         connections['AeAi'].w[i, j] = w
 
     connections['AiAe'] = Synapses(inh_group, exc_group, model='w : 1', on_pre='gi += w', delay=1*ms)
     for i, j, w in np.load(os.path.join(weight_path, 'AiAe.npy'), allow_pickle=True):
-        connections['AiAe'].connect(i=int(i), j=int(j))
+        i, j = int(i), int(j)
+        connections['AiAe'].connect(i=i, j=j)
         connections['AiAe'].w[i, j] = w
 
-    # Соединения для второго слоя
     if n_e2 > 0:
         connections['AeAe2'] = Synapses(exc_group, exc_group2, model='w : 1', on_pre='ge += w', delay=1*ms)
         w_ee2 = np.random.random((n_e, n_e2)).astype(np.float32) * 0.3
@@ -202,7 +208,7 @@ def main(args):
     performance = []
 
     # Сеть
-    net = Network(input_group, exc_group, inh_group, connections.values(), spike_monitor_e)
+    net = Network(input_group, exc_group, inh_group, *connections.values(), spike_monitor_e)
     if n_e2 > 0:
         net.add(exc_group2, spike_monitor_e2)
     net.store()
@@ -262,14 +268,12 @@ def main(args):
             print(f"Iteration {j}, Accuracy: {accuracy:.2f}%, Memory: {psutil.virtual_memory().percent}%")
             result_monitor.fill(0)
             if n_e2 > 0:
-                spike_monitor_e2.t = []
-                spike_monitor_e2.i = []
+                spike_monitor_e2.i, spike_monitor_e2.t = [], []
             else:
-                spike_monitor_e.t = []
-                spike_monitor_e.i = []
+                spike_monitor_e.i, spike_monitor_e.t = [], []
             gc.collect()
 
-        # Сохранение чекпоинта и результатов
+        # Сохранение результатов
         if j % save_interval == 0 and j > 0:
             net.store('checkpoint', filename=os.path.join(save_path, 'checkpoints', f'checkpoint_{j}.b2'))
             np.save(os.path.join(save_path, 'activity', f'result_monitor_{j}.npy'), result_monitor)
@@ -280,9 +284,9 @@ def main(args):
                 if n_e2 > 0:
                     np.save(os.path.join(save_path, 'weights', f'AeAe2_{j}.npy'), connections['AeAe2'].w)
                     np.save(os.path.join(save_path, 'weights', f'theta2_{j}.npy'), exc_group2.theta[:])
-            plot_2d_input_weights(connections['XeAe'].w, n_input, n_e, save_path)
+            plot_2d_input_weights(connections['XeAe'].w, n_input, n_e, save_path, 'layer1')
             if n_e2 > 0:
-                plot_2d_input_weights(connections['AeAe2'].w, n_e, n_e2, os.path.join(save_path, 'weights_layer2'))
+                plot_2d_input_weights(connections['AeAe2'].w, n_e, n_e2, save_path, 'layer2')
 
     # Финальное сохранение
     np.save(os.path.join(save_path, 'activity', 'result_monitor_final.npy'), result_monitor)
