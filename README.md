@@ -247,6 +247,75 @@ Note: `pickle`, `gzip`, `argparse` are standard. Install a C++ compiler if neede
 - Adjust `num_threads` for CPU parallelization.
 
 ---
+## Command-line Arguments
+
+The script accepts the following command-line arguments:
+
+| Argument | Type | Default | Description |
+|:---|:---|:---|:---|
+| `--n_e` | int | 200 | Number of excitatory neurons in the first layer. Higher values can improve model capacity but increase computation time. |
+| `--n_e2` | int | 0 | Number of excitatory neurons in the second layer. Set to 0 if no second layer is used. |
+| `--example_time` | float | 0.35 | Duration for which each input example is presented (in seconds). Controls how long the network processes each input. |
+| `--resting_time` | float | 0.15 | Resting period after each input (in seconds), allowing network activity to decay. |
+| `--num_examples` | int | 60000 | Total number of training examples. More examples can lead to better learning but take longer to train. |
+| `--update_interval` | int | 30000 | Interval (in examples) at which training statistics are updated and optionally printed/logged. |
+| `--weight_update_interval` | int | 100 | Frequency (in iterations) of synaptic weight updates. Smaller values result in more frequent learning updates. |
+| `--save_interval` | int | 5000 | Number of examples after which the model state is saved. Useful for checkpointing. |
+| `--input_intensity` | float | 2.0 | Scaling factor for the input signals. Higher values result in stronger input currents to neurons. |
+| `--weight_sum` | float | 78.0 | Target total synaptic weight per neuron. Helps regulate weight normalization and prevent runaway excitation. |
+| `--num_threads` | int | 2 | Number of CPU threads to use for computation. Adjust based on your hardware. |
+| `--resume_from` | int | None | If set, resumes training from a specific checkpoint iteration. Useful for continuing interrupted training. |
+| `--mnist_path` | str | `./mnist/` | Path to the MNIST dataset directory. |
+| `--data_path` | str | `./random/` | Path to initial synaptic weights (random or pretrained). |
+| `--save_path` | str | `./results/` | Path where results (models, logs, plots) will be saved. |
+| `--test_mode` | flag | - | If set, runs the model in test mode (no training), evaluating performance on test data only. |
+
+---
+
+## Example Usages
+
+Here are some examples of how to use these arguments:
+
+### Train a model with custom settings
+
+```bash
+python your_script.py --n_e 400 --example_time 0.5 --num_examples 10000 --input_intensity 1.5 --save_path ./custom_results/
+```
+- Uses 400 excitatory neurons.
+- Each example is shown for 0.5 seconds.
+- Trains on 10,000 examples.
+- Input intensity is reduced to 1.5.
+- Saves outputs to `./custom_results/`.
+
+---
+
+### Resume training from a checkpoint
+
+```bash
+python your_script.py --resume_from 30000 --save_path ./continued_training/
+```
+- Resumes training from iteration 30,000.
+- Results are saved in a different folder to avoid overwriting old files.
+
+---
+
+### Run in test mode only
+
+```bash
+python your_script.py --test_mode --mnist_path ./data/mnist/ --save_path ./test_results/
+```
+- No training will occur.
+- The script will load the dataset from `./data/mnist/` and save test results to `./test_results/`.
+
+---
+
+## Notes
+
+- **Higher `n_e` and `n_e2`** increase the model's capacity but also require more computational resources.
+- **Shorter `example_time` and `resting_time`** make training faster but can harm learning quality if too small.
+- **Adjust `num_threads`** based on your machine's CPU cores for better performance.
+- **Always make sure** the paths for MNIST data and saving results exist, or they will be created automatically.
+
 
 ### 6. `MNIST_evaluation.py`
 #### Overview
