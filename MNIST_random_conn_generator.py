@@ -95,3 +95,4 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default='./random/', help="Path to save weights")
     args = parser.parse_args()
     generate_weights(args)
+
