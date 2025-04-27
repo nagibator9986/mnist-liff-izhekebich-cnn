@@ -321,6 +321,7 @@ def main(args):
             if n_e2 > 0:
                 normalize_weights(connections['AeAe2'], weight_sum)
 
+        # Обновление назначений и производительности
         if j % update_interval == 0 and j > 0:
             print("Updating assignments and performance...")
             assignments = get_new_assignments(result_monitor, input_numbers[-update_interval:], n_e2 if n_e2 > 0 else n_e)
@@ -330,10 +331,17 @@ def main(args):
             performance.append(accuracy)
             print(f"Iteration {j}, Accuracy: {accuracy:.2f}%")
             result_monitor.fill(0)
+
+            # Удаляем старый монитор и создаём новый
+            net.remove(spike_monitor_e)
+            spike_monitor_e = SpikeMonitor(exc_group, name='spike_monitor_e')
+            net.add(spike_monitor_e)
+
             if n_e2 > 0:
-                spike_monitor_e2.i, spike_monitor_e2.t = [], []
-            else:
-                spike_monitor_e.i, spike_monitor_e.t = [], []
+                net.remove(spike_monitor_e2)
+                spike_monitor_e2 = SpikeMonitor(exc_group2, name='spike_monitor_e2')
+                net.add(spike_monitor_e2)
+
             gc.collect()
 
         # Сохранение результатов
@@ -378,8 +386,8 @@ if __name__ == "__main__":
     parser.add_argument('--n_e2', type=int, default=0, help="Number of excitatory neurons in second layer")
     parser.add_argument('--example_time', type=float, default=0.35, help="Time per example (s)")
     parser.add_argument('--resting_time', type=float, default=0.15, help="Resting time (s)")
-    parser.add_argument('--num_examples', type=int, default=10000, help="Number of examples")
-    parser.add_argument('--update_interval', type=int, default=1000, help="Update interval")
+    parser.add_argument('--num_examples', type=int, default=60000, help="Number of examples")
+    parser.add_argument('--update_interval', type=int, default=30000, help="Update interval")
     parser.add_argument('--weight_update_interval', type=int, default=100, help="Weight update interval")
     parser.add_argument('--save_interval', type=int, default=5000, help="Save interval")
     parser.add_argument('--input_intensity', type=float, default=2.0, help="Input intensity")
